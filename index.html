@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facebook Login Redirect</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 40px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .message {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        .debug-info {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 12px;
+            text-align: left;
+            max-width: 500px;
+            overflow-wrap: break-word;
+        }
+        .error {
+            background: rgba(220, 53, 69, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        .success {
+            background: rgba(40, 167, 69, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner" id="spinner"></div>
+        <div class="message" id="message">正在处理 Facebook 登录...</div>
+        <div class="debug-info" id="debug-info" style="display: none;"></div>
+    </div>
+
+    <script>
+        // 配置你的应用信息
+        const APP_CONFIG = {
+            // 替换为你的 Facebook 应用 ID
+            facebookAppId: '653181873930456',
+            // 自定义协议，用于重定向到移动应用
+            customScheme: 'fb' + '653181873930456' + '://',
+            // Web 应用的重定向 URL（如果有的话）
+            webRedirectUrl: null // 如 'https://yourwebapp.com/auth/callback'
+        };
+
+        let debugInfo = [];
+        let hasRedirected = false;
+
+        function log(message) {
+            debugInfo.push(new Date().toLocaleTimeString() + ': ' + message);
+            console.log(message);
+            updateDebugInfo();
+        }
+
+        function updateDebugInfo() {
+            const debugElement = document.getElementById('debug-info');
+            debugElement.innerHTML = debugInfo.join('<br>');
+        }
+
+        function showDebugInfo() {
+            document.getElementById('debug-info').style.display = 'block';
+        }
+
+        function updateMessage(message, type = 'info') {
+            const messageElement = document.getElementById('message');
+            const spinner = document.getElementById('spinner');
+            
+            messageElement.textContent = message;
+            
+            if (type === 'error') {
+                messageElement.className = 'message error';
+                spinner.style.display = 'none';
+            } else if (type === 'success') {
+                messageElement.className = 'message success';
+                spinner.style.display = 'none';
+            }
+        }
+
+        function detectPlatform() {
+            const userAgent = navigator.userAgent.toLowerCase();
+            const isAndroid = userAgent.includes('android');
+            const isIOS = /iphone|ipad|ipod/.test(userAgent);
+            const isMobile = isAndroid || isIOS;
+            const isInApp = userAgent.includes('fban') || userAgent.includes('fbav');
+            
+            return {
+                isAndroid,
+                isIOS,
+                isMobile,
+                isInApp,
+                userAgent
+            };
+        }
+
+        function getUrlParameters() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            
+            // 合并 query 和 hash 参数
+            const params = {};
+            for (let [key, value] of urlParams.entries()) {
+                params[key] = value;
+            }
+            for (let [key, value] of hashParams.entries()) {
+                params[key] = value;
+            }
+            
+            return params;
+        }
+
+        function buildRedirectUrl(baseUrl, params) {
+            const url = new URL(baseUrl);
+            Object.keys(params).forEach(key => {
+                if (params[key]) {
+                    url.searchParams.set(key, params[key]);
+                }
+            });
+            return url.toString();
+        }
+
+        function attemptAppRedirect(params, platform) {
+            return new Promise((resolve, reject) => {
+                const customUrl = buildRedirectUrl(APP_CONFIG.customScheme + 'authorize', params);
+                log('尝试打开应用: ' + customUrl);
+
+                // 创建隐藏的 iframe 尝试打开自定义协议
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = customUrl;
+                document.body.appendChild(iframe);
+
+                // 同时尝试使用 window.location（作为备选）
+                const timeout = setTimeout(() => {
+                    log('应用重定向超时，可能应用未安装');
+                    document.body.removeChild(iframe);
+                    reject(new Error('App redirect timeout'));
+                }, 2000);
+
+                // 监听页面是否失去焦点（表示应用可能已打开）
+                const handleVisibilityChange = () => {
+                    if (document.hidden) {
+                        log('页面失去焦点，应用可能已打开');
+                        clearTimeout(timeout);
+                        document.removeEventListener('visibilitychange', handleVisibilityChange);
+                        resolve(true);
+                    }
+                };
+
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+
+                // 备选方案：直接使用 window.location
+                setTimeout(() => {
+                    try {
+                        window.location.href = customUrl;
+                    } catch (e) {
+                        log('window.location 重定向失败: ' + e.message);
+                    }
+                }, 500);
+            });
+        }
+
+        function handleWebRedirect(params) {
+            if (APP_CONFIG.webRedirectUrl) {
+                const webUrl = buildRedirectUrl(APP_CONFIG.webRedirectUrl, params);
+                log('重定向到 Web 应用: ' + webUrl);
+                window.location.href = webUrl;
+                return true;
+            }
+            return false;
+        }
+
+        function handleError(error, params) {
+            log('发生错误: ' + error);
+            
+            if (params.error) {
+                updateMessage(`Facebook 登录失败: ${params.error_description || params.error}`, 'error');
+            } else {
+                updateMessage('登录处理失败，请重试', 'error');
+            }
+            
+            showDebugInfo();
+            
+            // 5秒后尝试重定向到应用或关闭窗口
+            setTimeout(() => {
+                if (window.opener) {
+                    window.close();
+                } else {
+                    // 最后尝试打开应用
+                    const fallbackUrl = APP_CONFIG.customScheme + 'authorize?error=' + encodeURIComponent(error);
+                    window.location.href = fallbackUrl;
+                }
+            }, 5000);
+        }
+
+        async function processRedirect() {
+            try {
+                // 防止重复处理
+                if (hasRedirected) {
+                    return;
+                }
+
+                const platform = detectPlatform();
+                const params = getUrlParameters();
+
+                log('平台信息: ' + JSON.stringify(platform));
+                log('URL 参数: ' + JSON.stringify(params));
+
+                // 检查是否有错误
+                if (params.error) {
+                    throw new Error(`Facebook 错误: ${params.error} - ${params.error_description || ''}`);
+                }
+
+                // 检查是否有授权码或访问令牌
+                if (!params.code && !params.access_token) {
+                    throw new Error('未收到有效的授权信息');
+                }
+
+                updateMessage('登录成功，正在跳转...', 'success');
+                hasRedirected = true;
+
+                // 根据平台和环境选择重定向策略
+                if (platform.isMobile) {
+                    // 移动端：优先尝试打开应用
+                    try {
+                        await attemptAppRedirect(params, platform);
+                        log('应用重定向成功');
+                        updateMessage('已跳转到应用', 'success');
+                    } catch (e) {
+                        log('应用重定向失败，尝试 Web 重定向');
+                        if (!handleWebRedirect(params)) {
+                            updateMessage('无法跳转到应用，请手动打开应用', 'error');
+                            showDebugInfo();
+                        }
+                    }
+                } else {
+                    // 桌面端：优先 Web 重定向，然后尝试应用
+                    if (!handleWebRedirect(params)) {
+                        // 如果没有配置 Web 重定向，尝试应用重定向
+                        try {
+                            const customUrl = buildRedirectUrl(APP_CONFIG.customScheme + 'authorize', params);
+                            window.location.href = customUrl;
+                            updateMessage('正在尝试打开应用...', 'success');
+                        } catch (e) {
+                            updateMessage('请手动复制登录信息到应用中', 'error');
+                            showDebugInfo();
+                        }
+                    }
+                }
+
+            } catch (error) {
+                hasRedirected = true;
+                handleError(error.message, getUrlParameters());
+            }
+        }
+
+        // 页面加载完成后开始处理
+        document.addEventListener('DOMContentLoaded', () => {
+            // 检查配置
+            if (APP_CONFIG.facebookAppId === 'YOUR_FACEBOOK_APP_ID') {
+                updateMessage('请先配置 Facebook 应用 ID', 'error');
+                showDebugInfo();
+                log('错误: 未配置 Facebook 应用 ID');
+                return;
+            }
+
+            // 延迟一下再处理，确保页面完全加载
+            setTimeout(processRedirect, 500);
+        });
+
+        // 处理页面可见性变化（用于检测应用是否已打开）
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && hasRedirected) {
+                log('页面重新获得焦点');
+            }
+        });
+
+        // 添加点击事件用于调试
+        document.addEventListener('click', () => {
+            if (!document.getElementById('debug-info').style.display || 
+                document.getElementById('debug-info').style.display === 'none') {
+                showDebugInfo();
+            }
+        });
+
+    </script>
+</body>
+</html>
