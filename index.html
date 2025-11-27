@@ -1,90 +1,107 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Facebook Callback</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Facebook 登录中...</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+    .card {
+      background: white;
+      padding: 40px 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      max-width: 400px;
+      margin: 40px auto;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #1877f2;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
-<script>
-  const clientId = "你的FacebookAppID"; // TODO: 替换
-  const redirectUri = "https://bestleesincn.github.io/facebook-callback/";
+  <div class="card">
+    <h2>正在登录 Facebook...</h2>
+    <div class="spinner"></div>
+    <p>请稍候，正在跳转到 Facebook 授权页面</p>
+  </div>
 
-  (function () {
-    console.log("Callback page loaded");
+  <script>
+    // 接收 Flutter 传来的参数（通过 URL query）
+    const urlParams = new URLSearchParams(window.location.search);
+    const appId = urlParams.get('appId');
+    const redirectUri = encodeURIComponent(window.location.href.split('?')[0]); // 当前页作为 redirect_uri
+    const scope = urlParams.get('scope') || 'public_profile,email';
+    const state = urlParams.get('state') || Math.random().toString(36).substring(2);
+    const responseType = 'code';
+    const display = 'popup'; // 重要！在移动端会触发系统浏览器
 
-    // ---- 1. 检查是否带有 access_token（Facebook 授权回跳） ----
-    if (window.location.hash.includes("access_token")) {
-      handleFacebookCallback();
-      return;
+    // Step 1: 如果没有 code，跳转去 Facebook 授权
+    if (!urlParams.has('code') && appId) {
+      const fbAuthUrl = `https://www.facebook.com/v24.0/dialog/oauth?` +
+        `client_id=${appId}` +
+        `&redirect_uri=${redirectUri}` +
+        `&state=${state}` +
+        `&scope=${scope}` +
+        `&response_type=${responseType}` +
+        `&display=${display}`;
+
+      // 重要：延迟一点跳转，避免被 WebView 拦截
+      setTimeout(() => {
+        window.location.href = fbAuthUrl;
+      }, 800);
     }
 
-    // ---- 2. 如果没有 token，说明是 Flutter 第一次打开 → 跳 Facebook 授权 ----
-    redirectToFacebookLogin();
-  })();
+    // Step 2: 如果有 code，说明用户授权回来了，通知 Flutter
+    if (urlParams.has('code')) {
+      const code = urlParams.get('code');
+      const receivedState = urlParams.get('state');
 
-  /**
-   * 跳转到 Facebook 授权页面
-   */
-  function redirectToFacebookLogin() {
-    const fbAuthUrl =
-      `https://www.facebook.com/v19.0/dialog/oauth?` +
-      `client_id=${clientId}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&response_type=token`;
+      const result = {
+        success: true,
+        code: code,
+        state: receivedState
+      };
 
-    console.log("Redirecting to FB Login:", fbAuthUrl);
-    window.location.href = fbAuthUrl;
-  }
-
-  /**
-   * 处理 Facebook 回调
-   * 将 token 发送到 Flutter 再关闭 WebView
-   */
-  function handleFacebookCallback() {
-    const hash = window.location.hash.substring(1);
-    const params = new URLSearchParams(hash);
-
-    const accessToken = params.get("access_token");
-    const expiresIn = params.get("expires_in");
-
-    const msg = {
-      success: !!accessToken,
-      accessToken,
-      expiresIn
-    };
-
-    console.log("Sending token to Flutter:", msg);
-    sendToFlutter(msg);
-
-    // 给 Flutter 一点时间处理
-    setTimeout(() => {
-      window.close();
-    }, 500);
-  }
-
-  /**
-   * 向 Flutter WebView 发送消息
-   */
-  function sendToFlutter(message) {
-    try {
-      // Android/iOS webview_flutter
-      if (window.AuthChannel && window.AuthChannel.postMessage) {
-        window.AuthChannel.postMessage(JSON.stringify(message));
-        return;
+      // 方式1：通过 JavaScriptChannel 发给 Flutter（推荐）
+      if (window.FlutterAuth) {
+        window.FlutterAuth.postMessage(JSON.stringify(result));
       }
 
-      // flutter_inappwebview
-      if (window.flutter_inappwebview) {
-        window.flutter_inappwebview.callHandler("AuthChannel", message);
-        return;
-      }
-
-      console.warn("No Flutter JS channel found");
-    } catch (err) {
-      console.error("Send to Flutter failed:", err);
+      // 方式2：兼容旧版（scheme 方案兜底）
+      setTimeout(() => {
+        document.body.innerHTML += `<h3>登录成功，正在返回APP...</h3>`;
+      }, 500);
     }
-  }
-</script>
+
+    // Step 3: 如果用户拒绝登录
+    if (urlParams.has('error')) {
+      const error = urlParams.get('error');
+      const message = urlParams.get('error_description') || '用户取消登录';
+
+      const result = {
+        success: false,
+        error: error,
+        message: message
+      };
+
+      if (window.FlutterAuth) {
+        window.FlutterAuth.postMessage(JSON.stringify(result));
+      }
+    }
+  </script>
 </body>
 </html>
