@@ -29,12 +29,11 @@
         @keyframes spin {
             100% { transform: rotate(360deg); }
         }
-        .msg {
-            font-size: 16px;
-        }
     </style>
 
     <script>
+        let isProcessed = false;  // 避免二次跳转
+
         function getQueryParam(name) {
             const url = new URL(window.location.href);
             return url.searchParams.get(name);
@@ -54,21 +53,25 @@
         window.onload = function () {
             const msgDiv = document.getElementById("msg");
 
+            // 避免重复执行任何逻辑
+            if (isProcessed) return;
+            isProcessed = true;
+
             // 1. 授权失败
             if (ERROR) {
                 msgDiv.innerHTML = "授权失败：" + decodeURIComponent(ERROR_DESC || ERROR);
                 sendToFlutter("error", ERROR_DESC || ERROR);
-                return;
+                return; // ❗ 一定要 return，防止往下走
             }
 
             // 2. 授权成功
             if (CODE) {
                 msgDiv.innerHTML = "授权成功，返回中…";
                 sendToFlutter("success", CODE);
-                return;
+                return; // ❗ 一定要 return
             }
 
-            // 3. 首次进入，开始授权
+            // 3. 首次进入页面 → 开始授权
             if (!APP_ID) {
                 msgDiv.innerHTML = "缺少 appid 参数";
                 sendToFlutter("error", "missing_appid");
@@ -85,16 +88,18 @@
                 `&response_type=code` +
                 `&scope=public_profile,email`;
 
+            // 延时确保 UI 渲染再跳转
             setTimeout(() => {
-                window.location.href = oauthUrl;
-            }, 500);
+                window.location.replace(oauthUrl);  
+                // 使用 replace 防止浏览器“回退”重新载入本页导致又一次跳转
+            }, 300);
         };
     </script>
 </head>
 <body>
 <div class="box">
     <div class="loading"></div>
-    <div id="msg" class="msg">加载中…</div>
+    <div id="msg">加载中…</div>
 </div>
 </body>
 </html>
