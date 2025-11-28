@@ -1,107 +1,100 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Facebook 登录中...</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #f0f2f5;
-      margin: 0;
-      padding: 20px;
-      text-align: center;
-    }
-    .card {
-      background: white;
-      padding: 40px 20px;
-      border-radius: 12px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      max-width: 400px;
-      margin: 40px auto;
-    }
-    .spinner {
-      border: 4px solid #f3f3f3;
-      border-top: 4px solid #1877f2;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      animation: spin 1s linear infinite;
-      margin: 20px auto;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+    <meta charset="UTF-8">
+    <title>Facebook Login Redirect</title>
+    <style>
+        body {
+            margin: 0;
+            background: #f4f6f9;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #333;
+        }
+        .box {
+            text-align: center;
+        }
+        .loading {
+            border: 6px solid #ddd;
+            border-top: 6px solid #4A90E2;
+            border-radius: 50%;
+            width: 45px;
+            height: 45px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+        .msg {
+            font-size: 16px;
+        }
+    </style>
+
+    <script>
+        function getQueryParam(name) {
+            const url = new URL(window.location.href);
+            return url.searchParams.get(name);
+        }
+
+        const APP_ID = getQueryParam("appid");
+        const CODE = getQueryParam("code");
+        const ERROR = getQueryParam("error");
+        const ERROR_DESC = getQueryParam("error_description");
+
+        function sendToFlutter(type, data) {
+            if (window.AppJS && window.AppJS.postMessage) {
+                window.AppJS.postMessage(JSON.stringify({type, data}));
+            }
+        }
+
+        window.onload = function () {
+            const msgDiv = document.getElementById("msg");
+
+            // 1. 授权失败
+            if (ERROR) {
+                msgDiv.innerHTML = "授权失败：" + decodeURIComponent(ERROR_DESC || ERROR);
+                sendToFlutter("error", ERROR_DESC || ERROR);
+                return;
+            }
+
+            // 2. 授权成功
+            if (CODE) {
+                msgDiv.innerHTML = "授权成功，返回中…";
+                sendToFlutter("success", CODE);
+                return;
+            }
+
+            // 3. 首次进入，开始授权
+            if (!APP_ID) {
+                msgDiv.innerHTML = "缺少 appid 参数";
+                sendToFlutter("error", "missing_appid");
+                return;
+            }
+
+            msgDiv.innerHTML = "跳转 Facebook 授权中…";
+
+            const redirectUri = encodeURIComponent("https://bestleesincn.github.io/facebook-callback/");
+            const oauthUrl =
+                `https://www.facebook.com/v19.0/dialog/oauth` +
+                `?client_id=${APP_ID}` +
+                `&redirect_uri=${redirectUri}` +
+                `&response_type=code` +
+                `&scope=public_profile,email`;
+
+            setTimeout(() => {
+                window.location.href = oauthUrl;
+            }, 500);
+        };
+    </script>
 </head>
 <body>
-  <div class="card">
-    <h2>正在登录 Facebook...</h2>
-    <div class="spinner"></div>
-    <p>请稍候，正在跳转到 Facebook 授权页面</p>
-  </div>
-
-  <script>
-    // 接收 Flutter 传来的参数（通过 URL query）
-    const urlParams = new URLSearchParams(window.location.search);
-    const appId = urlParams.get('appId');
-    const redirectUri = encodeURIComponent(window.location.href.split('?')[0]); // 当前页作为 redirect_uri
-    const scope = urlParams.get('scope') || 'public_profile,email';
-    const state = urlParams.get('state') || Math.random().toString(36).substring(2);
-    const responseType = 'code';
-    const display = 'popup'; // 重要！在移动端会触发系统浏览器
-
-    // Step 1: 如果没有 code，跳转去 Facebook 授权
-    if (!urlParams.has('code') && appId) {
-      const fbAuthUrl = `https://www.facebook.com/v24.0/dialog/oauth?` +
-        `client_id=${appId}` +
-        `&redirect_uri=${redirectUri}` +
-        `&state=${state}` +
-        `&scope=${scope}` +
-        `&response_type=${responseType}` +
-        `&display=${display}`;
-
-      // 重要：延迟一点跳转，避免被 WebView 拦截
-      setTimeout(() => {
-        window.location.href = fbAuthUrl;
-      }, 800);
-    }
-
-    // Step 2: 如果有 code，说明用户授权回来了，通知 Flutter
-    if (urlParams.has('code')) {
-      const code = urlParams.get('code');
-      const receivedState = urlParams.get('state');
-
-      const result = {
-        success: true,
-        code: code,
-        state: receivedState
-      };
-
-      // 方式1：通过 JavaScriptChannel 发给 Flutter（推荐）
-      if (window.FlutterAuth) {
-        window.FlutterAuth.postMessage(JSON.stringify(result));
-      }
-
-      // 方式2：兼容旧版（scheme 方案兜底）
-      setTimeout(() => {
-        document.body.innerHTML += `<h3>登录成功，正在返回APP...</h3>`;
-      }, 500);
-    }
-
-    // Step 3: 如果用户拒绝登录
-    if (urlParams.has('error')) {
-      const error = urlParams.get('error');
-      const message = urlParams.get('error_description') || '用户取消登录';
-
-      const result = {
-        success: false,
-        error: error,
-        message: message
-      };
-
-      if (window.FlutterAuth) {
-        window.FlutterAuth.postMessage(JSON.stringify(result));
-      }
-    }
-  </script>
+<div class="box">
+    <div class="loading"></div>
+    <div id="msg" class="msg">加载中…</div>
+</div>
 </body>
 </html>
