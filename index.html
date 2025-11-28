@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Facebook Login Redirect</title>
+
     <style>
         body {
             margin: 0;
@@ -14,9 +15,7 @@
             height: 100vh;
             color: #333;
         }
-        .box {
-            text-align: center;
-        }
+        .box { text-align: center; }
         .loading {
             border: 6px solid #ddd;
             border-top: 6px solid #4A90E2;
@@ -26,52 +25,51 @@
             animation: spin 1s linear infinite;
             margin: 0 auto 15px;
         }
-        @keyframes spin {
-            100% { transform: rotate(360deg); }
-        }
+        @keyframes spin { 100% { transform: rotate(360deg);} }
     </style>
 
     <script>
-        let isProcessed = false;  // 避免二次跳转
-
-        function getQueryParam(name) {
-            const url = new URL(window.location.href);
-            return url.searchParams.get(name);
+        function getParam(name) {
+            return new URL(location.href).searchParams.get(name);
         }
-
-        const APP_ID = getQueryParam("appid");
-        const CODE = getQueryParam("code");
-        const ERROR = getQueryParam("error");
-        const ERROR_DESC = getQueryParam("error_description");
 
         function sendToFlutter(type, data) {
             if (window.AppJS && window.AppJS.postMessage) {
-                window.AppJS.postMessage(JSON.stringify({type, data}));
+                window.AppJS.postMessage(JSON.stringify({ type, data }));
             }
         }
 
         window.onload = function () {
+
+            const APP_ID = getParam("appid");
+            const CODE = getParam("code");
+            const ERROR = getParam("error");
+            const ERROR_DESC = getParam("error_description");
             const msgDiv = document.getElementById("msg");
 
-            // 避免重复执行任何逻辑
-            if (isProcessed) return;
-            isProcessed = true;
-
-            // 1. 授权失败
-            if (ERROR) {
-                msgDiv.innerHTML = "授权失败：" + decodeURIComponent(ERROR_DESC || ERROR);
-                sendToFlutter("error", ERROR_DESC || ERROR);
-                return; // ❗ 一定要 return，防止往下走
+            // 🔒 防止 Facebook 回调后再次触发授权
+            if (sessionStorage.getItem("fb_auth_done") === "1") {
+                msgDiv.innerHTML = "已处理结果，返回中…";
+                return;
             }
 
-            // 2. 授权成功
+            // 1️⃣ 授权失败
+            if (ERROR) {
+                sessionStorage.setItem("fb_auth_done", "1");
+                msgDiv.innerHTML = "授权失败：" + (ERROR_DESC || ERROR);
+                sendToFlutter("error", ERROR_DESC || ERROR);
+                return;
+            }
+
+            // 2️⃣ 授权成功
             if (CODE) {
+                sessionStorage.setItem("fb_auth_done", "1");
                 msgDiv.innerHTML = "授权成功，返回中…";
                 sendToFlutter("success", CODE);
-                return; // ❗ 一定要 return
+                return;
             }
 
-            // 3. 首次进入页面 → 开始授权
+            // 3️⃣ 首次访问
             if (!APP_ID) {
                 msgDiv.innerHTML = "缺少 appid 参数";
                 sendToFlutter("error", "missing_appid");
@@ -82,20 +80,20 @@
 
             const redirectUri = encodeURIComponent("https://bestleesincn.github.io/facebook-callback/");
             const oauthUrl =
-                `https://www.facebook.com/v19.0/dialog/oauth` +
-                `?client_id=${APP_ID}` +
+                `https://www.facebook.com/v19.0/dialog/oauth?` +
+                `client_id=${APP_ID}` +
                 `&redirect_uri=${redirectUri}` +
                 `&response_type=code` +
                 `&scope=public_profile,email`;
 
-            // 延时确保 UI 渲染再跳转
             setTimeout(() => {
-                window.location.replace(oauthUrl);  
-                // 使用 replace 防止浏览器“回退”重新载入本页导致又一次跳转
-            }, 300);
+                sessionStorage.setItem("fb_auth_started", "1");
+                window.location.replace(oauthUrl);
+            }, 200);
         };
     </script>
 </head>
+
 <body>
 <div class="box">
     <div class="loading"></div>
